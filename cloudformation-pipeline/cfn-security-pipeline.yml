@@ -1,389 +1,285 @@
-AWSTemplateFormatVersion: 2010-09-09
-Description: Deploys a sample CodePipeline to scan and deploy CFN templates
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Test for candidates
+
 Parameters:
-  InitialCommitBucket:
+  InstanceType:
     Type: String
-    Description: The name of the S3 bucket containing the package for the initial commit for the DevSecOps pipeline
-  InitialCommitKey:
+    Default: t2.small
+    AllowedValues:
+      - t2.nano
+      - t2.micro
+      - t2.small
+
+  Environment:
     Type: String
-    Description: Name of the package for the initial commit for the DevSecOps pipeline DO NOT include .zip
-    Default: cfn-devsecops
-  ExampleStackName:
+    Default: dev
+    AllowedValues:
+      - dev
+      - prod
+
+  DBName:
+    Description: Name of the Database
     Type: String
-    Description: Name of the stack to be deployed in the final stage. Placeholder value and will likely not scale in prod
-    Default: SecDevOpsStack
+    Default: db1
+ 
+  MasterDbUserPassword: 
+    Description: Database Password 
+    Type: String
+    NoEcho: True
+    MinLength: 1
+    MaxLength: 8
+    AllowedPattern: ^[a-zA-Z0-9]*$
+  
+  Password:
+    NoEcho: True
+    Type: String
+    Description: New account password
+    MinLength: '1'
+    MaxLength: '41'
+    ConstraintDescription: the password must be between 1 and 41 characters
+
+  ImageId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+      
 Resources:
-  DevSecOpsCICDCodeCommit:
-    Type: AWS::CodeCommit::Repository
+  SpEc2Instance: 
+    Type: AWS::EC2::Instance
     Properties:
-      RepositoryDescription: Contains the Dockerfile and other scripts for the DevSecOps container scanning CICD pipeline
-      RepositoryName: cfn-devsecops
-      Code:
-        S3:
-          Bucket: !Ref InitialCommitBucket
-          Key: !Sub '${InitialCommitKey}.zip'
-  CodeBuildServiceRole:
-    Type: AWS::IAM::Role
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      SecurityGroups:
+        - !Ref ServerSecurityGroup 
+      UserData:                       
+        Fn::Base64: |
+          #!/bin/bash
+          sudo yum -y update
+          sudo yum -y install httpd php php-mysqlnd
+          sudo systemctl enable httpd
+          sudo systemctl start httpd
+          export AWS_ACCESS_KEY_ID=ESSEGINKULAKLARIVAAR 
+          export AWS_SECRET_ACCESS_KEY=wHenasieuFEek/34sfscC/jshsbvMAAKEYBOKBOK 
+          export AWS_DEFAULT_REGION=us-west-2
+          echo "<h1>Deployed via CloudFormation</h1>" | sudo tee /var/www/html/index.html
+
+  ServerSecurityGroup: 
+    Type: AWS::EC2::SecurityGroup
     Properties:
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
-      Policies:
-      - PolicyName: CodeBuildServiceRolePolicy
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - codecommit:GitPull
-            Resource: !GetAtt DevSecOpsCICDCodeCommit.Arn
-          - Effect: Allow
-            Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-            # these permissions are to create the stack within the pipeline
-            - s3:CreateBucket 
-            - codecommit:CreateRepository 
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - s3:GetObject
-            - s3:GetObjectVersion
-            - s3:PutObject
-            - s3:GetBucketAcl
-            - s3:GetBucketLocation
-            Resource:
-              - !Sub 'arn:aws:s3:::${DevSecOpsCICDCodePipelineArtifactBucket}'
-              - !Sub 'arn:aws:s3:::${DevSecOpsCICDCodePipelineArtifactBucket}/*'
-          - Effect: Allow
-            Action:
-            - kms:Decrypt
-            - ssm:GetParameter
-            - ssm:GetParameters
-            - cloudformation:DetectStackSetDrift
-            - cloudformation:ListExports
-            - cloudformation:DescribeStackDriftDetectionStatus
-            - cloudformation:DetectStackDrift
-            - cloudformation:ListStackSetOperations
-            - cloudformation:ListStackInstances
-            - cloudformation:ListTypes
-            - cloudformation:DescribeStackResource
-            - cloudformation:UpdateStackSet
-            - cloudformation:CreateChangeSet
-            - cloudformation:CreateStackInstances
-            - cloudformation:ListTypeRegistrations
-            - cloudformation:ListStackSetOperationResults
-            - cloudformation:DetectStackResourceDrift
-            - cloudformation:EstimateTemplateCost
-            - cloudformation:DescribeStackEvents
-            - cloudformation:DescribeStackSetOperation
-            - cloudformation:UpdateStack
-            - cloudformation:DescribeAccountLimits
-            - cloudformation:DescribeChangeSet
-            - cloudformation:CreateStackSet
-            - cloudformation:ExecuteChangeSet
-            - cloudformation:ListStackResources
-            - cloudformation:SetStackPolicy
-            - cloudformation:ListStacks
-            - cloudformation:DescribeType
-            - cloudformation:ListImports
-            - cloudformation:DescribeStackInstance
-            - cloudformation:DescribeStackResources
-            - cloudformation:DeleteStackSet
-            - cloudformation:DescribeTypeRegistration
-            - cloudformation:GetTemplateSummary
-            - cloudformation:DescribeStacks
-            - cloudformation:DescribeStackResourceDrifts
-            - cloudformation:GetStackPolicy
-            - cloudformation:DescribeStackSet
-            - cloudformation:ListStackSets
-            - cloudformation:CreateStack
-            - cloudformation:GetTemplate
-            - cloudformation:DeleteStack
-            - cloudformation:ValidateTemplate
-            - cloudformation:ListChangeSets
-            - cloudformation:ListTypeVersions 
-            Resource: '*'
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-        - Effect: Allow
-          Principal: { Service: codebuild.amazonaws.com }
-          Action:
-          - sts:AssumeRole
-  CodePipelineServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Policies:
-      - PolicyName: CodePipelineServiceRolePolicy
-        PolicyDocument:
-          Version: 2012-10-17
-          Statement:
-          - Effect: Allow
-            Action:
-            - codecommit:CancelUploadArchive
-            - codecommit:GetBranch
-            - codecommit:GetCommit
-            - codecommit:GetUploadArchiveStatus
-            - codecommit:UploadArchive
-            Resource: !GetAtt DevSecOpsCICDCodeCommit.Arn
-          - Effect: Allow
-            Action:
-            - cloudwatch:*
-            Resource: '*'
-          - Effect: Allow
-            Action:
-            - s3:GetObject
-            - s3:GetObjectVersion
-            - s3:PutObject
-            - s3:GetBucketAcl
-            - s3:GetBucketLocation
-            - s3:PutBucketPolicy
-            - s3:ListAllMyBuckets
-            - s3:ListBucket
-            Resource:
-              - !Sub 'arn:aws:s3:::${DevSecOpsCICDCodePipelineArtifactBucket}'
-              - !Sub 'arn:aws:s3:::${DevSecOpsCICDCodePipelineArtifactBucket}/*'
-          - Effect: Allow
-            Action:
-            - codebuild:BatchGetBuilds
-            - codebuild:StartBuild
-            Resource:
-              - !GetAtt LintingStage.Arn
-              - !GetAtt SecretScanStage.Arn
-              - !GetAtt CfRipperStage.Arn
-              - !GetAtt CfnNagStage.Arn
-              - !GetAtt CheckovDeploymentStage.Arn
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-        - Effect: Allow
-          Principal: { Service: codepipeline.amazonaws.com }
-          Action:
-          - sts:AssumeRole
-  DevSecOpsCICDCodePipelineArtifactBucket:
+      GroupDescription: allow connections from specified CIDR ranges
+      SecurityGroupIngress:
+      - IpProtocol: tcp     
+        FromPort: 80
+        ToPort: 80
+        CidrIp: 0.0.0.0/0
+      - IpProtocol: tcp     
+        FromPort: 22
+        ToPort: 22
+        CidrIp: 0.0.0.0/0
+
+  BucketInfra:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'devsecopscicd-artifacts-${AWS::AccountId}'
+      AccessControl: BucketOwnerFullControl 
+      BucketName: !Sub '${Environment}-file-sp-storage'
       PublicAccessBlockConfiguration:
-        BlockPublicAcls: true
-        BlockPublicPolicy: true
+        BlockPublicAcls: false    
         IgnorePublicAcls: true
+        BlockPublicPolicy: true
         RestrictPublicBuckets: true
-      VersioningConfiguration:
-        Status: Enabled
-      BucketEncryption:
-        ServerSideEncryptionConfiguration:
-          - ServerSideEncryptionByDefault:
-              SSEAlgorithm: AES256
-  LintingStage:
-    Type: AWS::CodeBuild::Project
+
+  BucketInfraPolicy:
+    Type: 'AWS::S3::BucketPolicy'
     Properties:
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Uses python-cfn-lint to lint CFN Templates - Managed by CloudFormation
-      Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:4.0
-        PrivilegedMode: True
-        Type: LINUX_CONTAINER
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-      Name: CFN-Linter
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Source:
-        BuildSpec: buildspecs/lint-buildspec.yaml
-        Type: CODEPIPELINE
-  SecretScanStage:
-    Type: AWS::CodeBuild::Project
+      Bucket: !Ref BucketInfra
+      PolicyDocument:
+        Id: InfraAbc
+        Version: 2012-10-17
+        Statement:
+          - Principal:
+              AWS: '*'
+            Effect: Allow
+            Action: '*'  
+            Resource: !Sub
+              - 'arn:aws:s3:::${bucketName}/*'
+              - bucketName: !Ref BucketInfra
+      
+  SpRestApi:
+    Type: AWS::ApiGateway::RestApi
     Properties:
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Uses Yelp's Detect-Secrets to look for any secrets or sensitive material - Managed by CloudFormation
-      Environment:
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: aws/codebuild/standard:4.0
-        PrivilegedMode: True
-        Type: LINUX_CONTAINER
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-      Name: CFN-Secrets
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Source:
-        BuildSpec: buildspecs/secrets-buildspec.yml
-        Type: CODEPIPELINE
-  CfRipperStage:
-    Type: AWS::CodeBuild::Project
+      Description: Example API 
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Name: 'sp-api'
+
+  SpApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
     Properties:
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Uses CF-Ripper to perfrom static security analysis of CloudFormation templates - Managed by CloudFormation
-      Environment:
-        ComputeType: BUILD_GENERAL1_MEDIUM
-        Image: aws/codebuild/standard:4.0
-        PrivilegedMode: True
-        Type: LINUX_CONTAINER
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-      Name: CF-Ripper
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Source:
-        BuildSpec: buildspecs/cfripper-buildspec.yml
-        Type: CODEPIPELINE
-  CfnNagStage:
-    Type: AWS::CodeBuild::Project
+      AuthorizationType: NONE 
+      HttpMethod: GET
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 422
+        - StatusCode: 501
+      ResourceId: !GetAtt SpRestApi.RootResourceId
+      RestApiId: !Ref SpRestApi
+
+
+  DefaultDB:
+    Type: AWS::RDS::DBInstance
     Properties:
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Uses CFN-Nag to perfrom static security analysis of CloudFormation templates - Managed by CloudFormation
-      Environment:
-        ComputeType: BUILD_GENERAL1_MEDIUM
-        Image: aws/codebuild/standard:4.0
-        PrivilegedMode: True
-        Type: LINUX_CONTAINER
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-      Name: CFN-Nag
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Source:
-        BuildSpec: buildspecs/cfnnag-buildspec.yml
-        Type: CODEPIPELINE
-  CheckovDeploymentStage:
-    Type: AWS::CodeBuild::Project
+      DBName: !Ref DBName
+      DBInstanceClass: db.t3.micro
+      Engine: MySQL
+      DeletionProtection: true 
+      AllocatedStorage: "20"
+      MasterUsername: admin
+      MasterUserPassword: !Ref MasterDbUserPassword
+      MultiAZ: false 
+      PubliclyAccessible: true 
+      BackupRetentionPeriod: 0
+
+  User:
+    Type: AWS::IAM::User
     Properties:
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Uses Checkov to perform static security analysis of CloudFormation templates before creating and deploying a stack - Managed by CloudFormation
-      Environment:
-        ComputeType: BUILD_GENERAL1_MEDIUM
-        Image: aws/codebuild/standard:4.0
-        PrivilegedMode: True
-        Type: LINUX_CONTAINER
-        EnvironmentVariables:
-        - Name: STACK_NAME
-          Type: PLAINTEXT
-          Value: !Ref ExampleStackName
-      LogsConfig:
-        CloudWatchLogs:
-          Status: ENABLED
-      Name: CheckovDeploymentStage
-      ServiceRole: !GetAtt CodeBuildServiceRole.Arn
-      Source:
-        BuildSpec: buildspecs/checkov-createstack-buildspec.yml
-        Type: CODEPIPELINE
-  DevSecOpsCICDCodePipeline:
-    Type: AWS::CodePipeline::Pipeline
+      UserName: !Sub "sp-${Environment}-user" 
+      LoginProfile:
+        Password: !Ref 'Password'
+  
+  UserPolicy:
+    Type: AWS::IAM::Policy
     Properties:
-      ArtifactStore:
-        Location: !Ref DevSecOpsCICDCodePipelineArtifactBucket
-        Type: S3
-      Name: !Sub 'DevSecOpsCICD-scan-cicd-pipeline-${AWS::AccountId}'
-      RestartExecutionOnUpdate: True
-      RoleArn: !GetAtt CodePipelineServiceRole.Arn
-      Stages:
-        -
-          Name: Source
-          Actions:
-            -
-              Name: SourceAction
-              ActionTypeId:
-                Category: Source
-                Owner: AWS
-                Version: 1
-                Provider: CodeCommit
-              Configuration:
-                RepositoryName: !GetAtt DevSecOpsCICDCodeCommit.Name
-                BranchName: master
-              OutputArtifacts:
-                -
-                  Name: SourceOutput
-              RunOrder: 1
-        -
-          Name: CFN-Linter
-          Actions:
-            -
-              InputArtifacts:
-                -
-                  Name: SourceOutput
-              Name: BuildAction
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                  ProjectName: !Ref LintingStage
-                  PrimarySource: SourceOutput
-              RunOrder: 2
-        -
-          Name: CFN-Secrets
-          Actions:
-            -
-              InputArtifacts:
-                -
-                  Name: SourceOutput
-              Name: BuildAction
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                  ProjectName: !Ref SecretScanStage
-                  PrimarySource: SourceOutput
-              RunOrder: 3
-        -
-          Name: CF-Ripper
-          Actions:
-            -
-              InputArtifacts:
-                -
-                  Name: SourceOutput
-              Name: BuildAction
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                  ProjectName: !Ref CfRipperStage
-                  PrimarySource: SourceOutput
-              RunOrder: 4
-        -
-          Name: CFN-Nag
-          Actions:
-            -
-              InputArtifacts:
-                -
-                  Name: SourceOutput
-              Name: BuildAction
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                  ProjectName: !Ref CfnNagStage
-                  PrimarySource: SourceOutput
-              RunOrder: 5
-        -
-          Name: CheckovDeploymentStage
-          Actions:
-            -
-              InputArtifacts:
-                -
-                  Name: SourceOutput
-              Name: BuildAction
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Version: 1
-                Provider: CodeBuild
-              Configuration:
-                  ProjectName: !Ref CheckovDeploymentStage
-                  PrimarySource: SourceOutput
-              RunOrder: 6
+      PolicyName: simple_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - "ec2:*"
+              - "s3:*"
+              - "cloudwatch:*"
+            Resource: "*"
+      Users:
+        - !Ref User
+   TaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      ExecutionRoleArn: !Sub
+        - 'arn:aws:iam::${a}:role/Role${r}ClusterExecution'
+        - a: !Ref 'AWS::AccountId'
+          r: !Ref ResourceTag
+      TaskRoleArn: !Sub
+        - 'arn:aws:iam::${a}:role/Role'
+        - a: !Ref 'AWS::AccountId'
+          r: !Ref ResourceTag
+      ContainerDefinitions:
+        - Name: !Sub
+            - '${e}-${r}'
+            - e: !Ref Environment
+              r: !Ref ResourceTag
+          Image: !Ref DockerImageId
+          Environment:
+            - Name: api_pass
+              Value: "ssddhfkd23!!"
+          Secrets:
+            - Name: kvk_api_certificate
+              ValueFrom: !Sub
+                - 'arn:aws:ssm:${region}:${account}:parameter/kvk_api_key'
+                - region: !Ref 'AWS::Region'
+                  account: !Ref 'AWS::AccountId'
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "{{resolve:ssm:/platform-kvk-dataloader/cfn/${ResourceTag}/LogGroup}}"
+              awslogs-region: !Ref 'AWS::Region'
+              awslogs-stream-prefix: ecs
+
+  KMSKeyforRoleKvkDataloader:
+    Type: AWS::KMS::Key
+    Properties:
+      EnableKeyRotation: true
+      Description: Key used from specific role
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: KEY-POLICY
+        Statement:
+          - Sid: Allow administration of the key
+            Effect: Allow
+            Principal: * 
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:TagResource
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt:
+                  - RoleClusterExecution
+                  - Arn
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: "*"
+          - Sid: Allow use of the key
+            Effect: Allow
+            Principal:
+              AWS:
+                Fn::GetAtt:
+                  - RoleKvkDataloader
+                  - Arn
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+            Resource: "*"
+            
+  PolicyRoleKvkDataloaderClusterExecution:
+    Type: 'AWS::IAM::ManagedPolicy'
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 'ecr:BatchCheckLayerAvailability'
+              - 'ecr:GetDownloadUrlForLayer'
+              - 'ecr:BatchGetImage'
+            Resource:
+              - !Sub
+                - 'arn:aws:ecr:${region}:${account}:repository/*'
+                - region: !Ref 'AWS::Region'
+                  account: !Ref ECRAccountId
+          - Effect: Allow
+            Action: *
+            Resource: '*'
+          - Effect: Allow
+            Action:
+              - 'logs:CreateLogStream'
+              - 'logs:PutLogEvents'
+            Resource:
+              - !Sub
+                - 'arn:aws:logs:${region}:${account}:log-group:Role${r}:*'
+                - region: !Ref 'AWS::Region'
+                  account: !Ref 'AWS::AccountId'
+                  r: !Ref ResourceTag
+
+          - Effect: Allow
+            Action:
+              - 'ssm:GetParameters'
+              - 'ssm:GetParameter'
+            Resource: *
